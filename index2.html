@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>무차별 대입 공격 시뮬레이터</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-6">
+  <div class="bg-white shadow-lg rounded-2xl p-6 max-w-2xl mx-auto">
+    <h2 class="text-2xl font-bold mb-4">🔐 무차별 대입 공격 시뮬레이터</h2>
+
+    <div class="mb-6">
+      <label for="passwordInput" class="block font-semibold mb-1">비밀번호 입력</label>
+      <input id="passwordInput" type="text" placeholder="예: password123" class="w-full border border-gray-300 rounded-md p-2" />
+      <button onclick="hashPassword()" class="bg-blue-500 text-white mt-2 px-4 py-2 rounded hover:bg-blue-600">해시 변환</button>
+      <p class="mt-2 text-sm">해시값: <span id="hashedResult" class="font-mono bg-gray-100 px-2 py-1 rounded">-</span></p>
+    </div>
+
+    <div class="mb-6">
+      <label for="hashToCrack" class="block font-semibold mb-1">공격 대상 해시값</label>
+      <input id="hashToCrack" type="text" class="w-full border border-gray-300 rounded-md p-2" placeholder="SHA-256 해시값 입력" />
+    </div>
+
+    <div class="mb-6">
+      <label class="block font-semibold mb-1">문자 종류 선택</label>
+      <div class="flex flex-wrap gap-4">
+        <label><input type="checkbox" id="includeNumbers" checked class="mr-1"/>숫자 (0-9)</label>
+        <label><input type="checkbox" id="includeLowercase" class="mr-1"/>소문자 (a-z)</label>
+        <label><input type="checkbox" id="includeUppercase" class="mr-1"/>대문자 (A-Z)</label>
+        <label><input type="checkbox" id="includeSymbols" class="mr-1"/>특수문자 (!@#$...)</label>
+      </div>
+    </div>
+
+    <div class="mb-6">
+      <label for="maxLength" class="block font-semibold mb-1">최대 자릿수</label>
+      <input type="number" id="maxLength" min="1" value="4" class="w-24 border border-gray-300 rounded-md p-2" />
+    </div>
+
+    <button onclick="startBruteForce()" class="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700">공격 시작</button>
+
+    <div class="mt-4">
+      <div class="w-full h-4 bg-gray-200 rounded-full overflow-hidden">
+        <div class="h-full bg-green-500 transition-all" id="progressBar" style="width: 0%"></div>
+      </div>
+      <p class="text-sm mt-2 text-center">진행률: <span id="progressText">0%</span></p>
+    </div>
+
+    <p id="result" class="mt-6 text-lg font-semibold text-center">결과: -</p>
+  </div>
+
+  <script>
+    function hashPassword() {
+      const password = document.getElementById("passwordInput").value;
+      const hash = CryptoJS.SHA256(password).toString();
+      document.getElementById("hashedResult").textContent = hash;
+    }
+
+    function getCharset() {
+      let charset = "";
+      if (document.getElementById("includeNumbers").checked) charset += "0123456789";
+      if (document.getElementById("includeLowercase").checked) charset += "abcdefghijklmnopqrstuvwxyz";
+      if (document.getElementById("includeUppercase").checked) charset += "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      if (document.getElementById("includeSymbols").checked) charset += "!@#$%^&*()-_=+[]{}|;:'\",.<>/?`~";
+      return charset;
+    }
+
+    async function startBruteForce() {
+      const targetHash = document.getElementById("hashToCrack").value.trim();
+      const charset = getCharset();
+      const maxLen = parseInt(document.getElementById("maxLength").value);
+      const resultBox = document.getElementById("result");
+      const progressBar = document.getElementById("progressBar");
+      const progressText = document.getElementById("progressText");
+
+      if (!charset) {
+        alert("하나 이상의 문자 종류를 선택하세요.");
+        return;
+      }
+
+      resultBox.textContent = "공격 시작...";
+      progressBar.style.width = "0%";
+      progressText.textContent = "0%";
+
+      let found = false;
+      let attempts = 0;
+      const startTime = performance.now();
+
+      let totalComb = 0;
+      for (let len = 1; len <= maxLen; len++) {
+        totalComb += Math.pow(charset.length, len);
+      }
+
+      let testedComb = 0;
+
+      async function* generateStrings(charset, maxLen) {
+        for (let len = 1; len <= maxLen; len++) {
+          const indices = Array(len).fill(0);
+          while (true) {
+            yield indices.map(i => charset[i]).join("");
+            let pos = len - 1;
+            while (pos >= 0) {
+              if (indices[pos] + 1 < charset.length) {
+                indices[pos]++;
+                break;
+              } else {
+                indices[pos] = 0;
+                pos--;
+              }
+            }
+            if (pos < 0) break;
+          }
+        }
+      }
+
+      for await (const candidate of generateStrings(charset, maxLen)) {
+        const hash = CryptoJS.SHA256(candidate).toString();
+        attempts++;
+        testedComb++;
+
+        if (attempts % 500 === 0) {
+          const percent = ((testedComb / totalComb) * 100).toFixed(1);
+          progressBar.style.width = percent + "%";
+          progressText.textContent = percent + "%";
+        }
+
+        if (hash === targetHash) {
+          const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+          resultBox.textContent = `✅ 비밀번호 찾음: "${candidate}" (시도: ${attempts}회, 시간: ${elapsed}초)`;
+          progressBar.style.width = "100%";
+          progressText.textContent = "100%";
+          found = true;
+          break;
+        }
+
+        if (attempts % 2000 === 0) await new Promise(r => setTimeout(r, 1));
+      }
+
+      if (!found) {
+        resultBox.textContent = `❌ 실패: ${maxLen}자리 이하에서 찾지 못했습니다.`;
+      }
+    }
+  </script>
+</body>
+</html>
